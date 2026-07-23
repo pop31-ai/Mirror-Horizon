@@ -76,7 +76,7 @@ function proj(px,py,pz,cam){
     const depth=rz*cos+rx*sin;
     if(depth<2)return null;
     const inv=400/depth;
-    return{x:(rx*cos-rz*sin)*inv,y:(py-25)*inv,depth};
+    return{x:(rx*cos-rz*sin)*inv,y:(py-25)*inv*0.4,depth};
 }
 
 const MAX_PARTICLES=700,MAX_DEBRIS=300;
@@ -126,7 +126,7 @@ class Robot{
         if(depth<5)return;
         const inv=400/depth;
         const sx=W/2+(rx*cos-rz*sin)*inv;
-        const sy=H*0.42+(getTerrain(this.x,this.z)-25)*inv;
+        const sy=H*0.42+25*400/(depth+80);
         const sz=Math.max(3,this.size*inv);
         const isA=this.team==='ally';
         const bc=isA?(this.type===1?'#28f':this.type===2?'#4df':'#4af'):(this.type===1?'#f80':this.type===2?'#ff0':'#f44');
