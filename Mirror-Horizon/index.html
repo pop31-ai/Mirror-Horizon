@@ -27,7 +27,7 @@ canvas{display:block}
 <div id="start">
 MIRROR HORIZON
 <span class="sub">CLICK TO DEPLOY</span>
-<span class="keys">W/S — ГАЗ / ТОРМОЗ | A/D — ПОВОРОТ<br>МЫШЬ — НАКЛОН ВВЕРХ/ВНИЗ | ЛКМ — ОГОНЬ<br>SHIFT — ТУРБО | АВТОПРИЦЕЛ</span>
+<span class="keys">W/S — ГАЗ / ТОРМОЗ | A/D — ПОВОРОТ<br>МЫШЬ — НАКЛОН ВВЕРХ/ВНИЗ | ЛКМ — ОГОНЬ<br>SHIFT — ТУРБО | ПКМ / E — ЗУМ ПРИЦЕЛА<br>АВТОПРИЦЕЛ | ОЧЕРЕДЯМИ</span>
 </div>
 <script>
 const C=document.getElementById('c'),X=C.getContext('2d'),UI=document.getElementById('ui'),
@@ -39,13 +39,16 @@ resize();addEventListener('resize',resize);
 const mirrors=[];
 for(let i=0;i<3;i++){const mc=document.createElement('canvas');mc.className='mirror';mc.width=130;mc.height=85;MD.appendChild(mc);mirrors.push(mc.getContext('2d'))}
 
-let game=null;const keys={};let mouseX=0,mouseY=0,prevMouseX=0,prevMouseY=0,mouseDeltaX=0,mouseDown=false;
-const GAME_KEYS=new Set(['KeyW','KeyA','KeyS','KeyD','ShiftLeft','ShiftRight','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space']);
+const zoomBuf=document.createElement('canvas');
+const Z=zoomBuf.getContext('2d');
+
+let game=null;const keys={};let mouseX=0,mouseY=0,prevMouseX=0,prevMouseY=0,mouseDeltaX=0,mouseDown=false,rightDown=false;
+const GAME_KEYS=new Set(['KeyW','KeyA','KeyS','KeyD','ShiftLeft','ShiftRight','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space','KeyE']);
 document.addEventListener('keydown',e=>{keys[e.code]=true;if(GAME_KEYS.has(e.code))e.preventDefault()});
 document.addEventListener('keyup',e=>{keys[e.code]=false;});
 document.addEventListener('mousemove',e=>{mouseX=e.clientX;mouseY=e.clientY});
-document.addEventListener('mousedown',e=>{if(!game){game=new Game();START.style.display='none'}else if(e.button===0){mouseDown=true;game.shoot()}});
-document.addEventListener('mouseup',e=>{mouseDown=false});
+document.addEventListener('mousedown',e=>{if(!game){game=new Game();START.style.display='none'}else if(e.button===0){mouseDown=true;game.shoot()}else if(e.button===2){rightDown=true}});
+document.addEventListener('mouseup',e=>{if(e.button===0)mouseDown=false;if(e.button===2)rightDown=false});
 C.addEventListener('contextmenu',e=>e.preventDefault());
 
 const ALLY_NAMES=['ВАРДЕН','СТРАЖ','ЩИТ','БАСТИОН','ГВАРД','ОПЛОТ','ЗАСЛОН','КАРАУЛ','ФОРПОСТ','КУРАНТ'];
@@ -172,7 +175,7 @@ class Game{
         this.particles=[];this.beams=[];this.debris=[];
         this.cooldown=0;this.shake=0;this.kills=0;
         this.shieldRegen=0;this.alerts=[];this.gameTime=0;
-        this.heat=0;this.startWave();
+        this.heat=0;this.zoomed=false;this.zoomLevel=1;this.targetLock=null;this.burstCount=0;this.burstTimer=0;this.startWave();
     }
     startWave(){
         this.wave++;this.waveTimer=3;
@@ -235,6 +238,7 @@ class Game{
     shoot(){
         if(this.cooldown>0||!game||this.heat>90)return;
         this.cooldown=0.07;this.heat+=1.5;
+        this.burstCount++;this.burstTimer=0.3;
 
         // Find nearest enemy on screen → aim directly at it
         let bestE=null,bestS=1e9;
@@ -312,6 +316,13 @@ class Game{
         this.cooldown=Math.max(0,this.cooldown-dt);
         this.heat=Math.max(0,this.heat-dt*30);
         this.shake*=0.85;
+        this.burstTimer=Math.max(0,this.burstTimer-dt);
+        if(this.burstTimer<=0)this.burstCount=0;
+
+        // Zoom toggle
+        this.zoomed=rightDown||keys['KeyE'];
+        document.getElementById('crosshair').style.display=this.zoomed?'none':'block';
+
         if(mouseDown)this.shoot();
 
         // Mouse Y = pitch only. Rotation = WASD keys only
@@ -321,9 +332,9 @@ class Game{
 
         // WASD moves, A/D also turns camera
         const turbo=keys['ShiftLeft']||keys['ShiftRight'];
-        const maxSpd=turbo?250:140;
-        if(keys['KeyA']||keys['ArrowLeft'])this.cam.angle-=2.5*dt;
-        if(keys['KeyD']||keys['ArrowRight'])this.cam.angle+=2.5*dt;
+        const maxSpd=(turbo?250:140)*(this.zoomed?0.5:1);
+        if(keys['KeyA']||keys['ArrowLeft'])this.cam.angle-=2.5*dt*(this.zoomed?0.4:1);
+        if(keys['KeyD']||keys['ArrowRight'])this.cam.angle+=2.5*dt*(this.zoomed?0.4:1);
         let moveF=0;
         if(keys['KeyW']||keys['ArrowUp'])moveF+=1;
         if(keys['KeyS']||keys['ArrowDown'])moveF-=1;
@@ -335,6 +346,20 @@ class Game{
             this.speed*=0.9;
         }
         this.cam.y=getTerrain(this.cam.x,this.cam.z)+25;
+
+        // Target lock detection
+        this.targetLock=null;
+        let bestSD=1e9;
+        for(const e of this.enemies){
+            if(!e.alive)continue;
+            const rx=e.x-this.cam.x,rz=e.z-this.cam.z;
+            const cos=Math.cos(this.cam.angle),sin=Math.sin(this.cam.angle);
+            const depth=rx*sin+rz*cos;
+            if(depth<5)continue;
+            const sx=(rx*cos-rz*sin)*400/depth;
+            const sd=sx*sx;
+            if(sd<bestSD&&sd<90000){bestSD=sd;this.targetLock=e}
+        }
 
         this.shieldRegen+=dt;
         if(this.shieldRegen>2&&this.shield<this.maxShield)this.shield=Math.min(this.maxShield,this.shield+10*dt);
@@ -515,7 +540,7 @@ class Game{
 <div style="color:#f44">ВРАГИ: ${this.enemies.filter(e=>e.alive).length}</div>
 <div style="color:#4af">СОЮЗНИКИ: ${this.allies.filter(a=>a.alive).length}</div>
 <div style="color:#fff8">УНИЧТОЖЕНО: ${this.kills}</div>
-<div style="color:#fff3;font-size:9px">W/S ГАЗ | A/D ПОВОРОТ<br>МЫШЬ БАШНЯ | ЛКМ ОГОНЬ</div>`;
+<div style="color:#fff3;font-size:9px">W/S ГАЗ | A/D ПОВОРОТ<br>МЫШЬ БАШНЯ | ЛКМ ОГОНЬ<br>ПКМ/E — ЗУМ | АВТОПРИЦЕЛ</div>`;
 
         // Mirrors
         const ae=this.enemies.filter(e=>e.alive);
@@ -539,6 +564,116 @@ class Game{
         }
 
         this.drawMiniMap();
+
+        // Draw targeting brackets on locked enemy (when visible)
+        if(this.targetLock){
+            const tl=this.targetLock;
+            const rx=tl.x-this.cam.x,rz=tl.z-this.cam.z;
+            const cos=Math.cos(this.cam.angle),sin=Math.sin(this.cam.angle);
+            const depth=rx*sin+rz*cos;
+            if(depth>5){
+                const sx=W/2+(rx*cos-rz*sin)*400/depth;
+                const sy=H*0.42+25*400/(depth+80);
+                const sz=Math.max(8,tl.size*400/depth*1.3);
+                X.strokeStyle=this.zoomed?'#0f0':'#0f04';
+                X.lineWidth=this.zoomed?2:1;
+                const bsz=sz*0.7;
+                // Corner brackets
+                for(let cx=-1;cx<=1;cx+=2)for(let cy=-1;cy<=1;cy+=2){
+                    X.beginPath();
+                    X.moveTo(sx+cx*bsz,sy+cy*bsz*0.3);
+                    X.lineTo(sx+cx*bsz,sy+cy*bsz*0.3+cy*-bsz*0.4);
+                    X.moveTo(sx+cx*bsz,sy+cy*bsz*0.3);
+                    X.lineTo(sx+cx*bsz-cx*bsz*0.4,sy+cy*bsz*0.3);
+                    X.stroke();
+                }
+                // Distance label
+                const dist=Math.round(Math.sqrt(rx*rx+rz*rz));
+                X.fillStyle='#0f08';X.font='bold 10px Courier New';X.textAlign='center';
+                X.fillText(dist+'м',sx,sy+bsz*0.3+14);
+                X.fillStyle='#f448';X.font='9px Courier New';
+                X.fillText(tl.name,sx,sy+bsz*0.3+24);
+                X.lineWidth=1;
+            }
+        }
+
+        // Burst fire counter in HUD
+        if(this.burstCount>0){
+            X.fillStyle='#0f0a';X.font='bold 11px Courier New';X.textAlign='center';
+            X.fillText('ОЧЕРЕДЬ: '+this.burstCount,W/2,H*0.42-60);
+        }
+
+        // ZOOM SCOPE — actual zoom using offscreen buffer
+        if(this.zoomed){
+            const scopeR=Math.min(W,H)*0.32;
+            const cx=W/2,cy=H*0.42;
+            const zl=2.5;
+
+            // Darken everything outside scope
+            X.save();
+            X.fillStyle='rgba(0,0,0,0.8)';
+            X.beginPath();X.rect(0,0,W,H);
+            X.moveTo(cx+scopeR,cy);X.arc(cx,cy,scopeR,0,Math.PI*2,true);X.fill();
+
+            // Copy and draw zoomed scene inside scope
+            zoomBuf.width=W;zoomBuf.height=H;
+            Z.drawImage(C,0,0);
+            X.beginPath();X.arc(cx,cy,scopeR,0,Math.PI*2);X.clip();
+            X.translate(cx,cy);X.scale(zl,zl);X.translate(-cx,-cy);
+            X.drawImage(zoomBuf,0,0);
+            X.restore();
+
+            // Scope border glow (on top)
+            X.save();
+            X.strokeStyle='#0f0';X.lineWidth=2;
+            X.shadowColor='#0f0';X.shadowBlur=12;
+            X.beginPath();X.arc(cx,cy,scopeR,0,Math.PI*2);X.stroke();
+            X.shadowBlur=0;
+            // Inner ring
+            X.strokeStyle='#0f03';X.lineWidth=1;
+            X.beginPath();X.arc(cx,cy,scopeR*0.85,0,Math.PI*2);X.stroke();
+            // Crosshair lines inside scope
+            X.strokeStyle='#0f08';X.lineWidth=1;
+            X.beginPath();X.moveTo(cx-scopeR*0.9,cy);X.lineTo(cx-scopeR*0.15,cy);X.stroke();
+            X.beginPath();X.moveTo(cx+scopeR*0.15,cy);X.lineTo(cx+scopeR*0.9,cy);X.stroke();
+            X.beginPath();X.moveTo(cx,cy-scopeR*0.9);X.lineTo(cx,cy-scopeR*0.15);X.stroke();
+            X.beginPath();X.moveTo(cx,cy+scopeR*0.15);X.lineTo(cx,cy+scopeR*0.9);X.stroke();
+            // Center dot
+            X.fillStyle='#0f0';X.beginPath();X.arc(cx,cy,2,0,Math.PI*2);X.fill();
+            // Range marks on horizontal line
+            X.fillStyle='#0f05';X.font='8px Courier New';X.textAlign='center';
+            for(let i=-3;i<=3;i++){
+                if(i===0)continue;
+                const mx=cx+i*scopeR*0.22;
+                X.fillRect(mx,cy-3,1,6);
+                X.fillText(Math.abs(i*100)+'',mx,cy-8);
+            }
+            // Angle marks on vertical
+            for(let i=-3;i<=3;i++){
+                if(i===0)continue;
+                const my=cy+i*scopeR*0.22;
+                X.fillRect(cx-3,my,6,1);
+            }
+            // Scope info panel
+            X.fillStyle='#0f06';X.font='9px Courier New';X.textAlign='left';
+            X.fillText('ЗУМ x2.5',cx-scopeR+10,cy-scopeR+16);
+            X.fillText('ТЕПЛО: '+Math.ceil(this.heat)+'%',cx-scopeR+10,cy-scopeR+28);
+            const aliveEnemies=this.enemies.filter(e=>e.alive).length;
+            X.fillText('ЦЕЛИ: '+aliveEnemies,cx-scopeR+10,cy-scopeR+40);
+            if(this.targetLock){
+                const tl2=this.targetLock;
+                const rx2=tl2.x-this.cam.x,rz2=tl2.z-this.cam.z;
+                const d2=Math.round(Math.sqrt(rx2*rx2+rz2*rz2));
+                X.fillStyle='#f44a';X.textAlign='right';
+                X.fillText('БЛОКИРОВКА: '+tl2.name,cx+scopeR-10,cy-scopeR+16);
+                X.fillText('ДАЛЬНОСТЬ: '+d2+'м',cx+scopeR-10,cy-scopeR+28);
+                X.fillText('ТИП: '+(tl2.type===1?'ТЯЖЁЛЫЙ':tl2.type===2?'ЛЁГКИЙ':'СРЕДНИЙ'),cx+scopeR-10,cy-scopeR+40);
+            }else{
+                X.fillStyle='#0f05';X.textAlign='right';
+                X.fillText('ПОИСК ЦЕЛИ...',cx+scopeR-10,cy-scopeR+16);
+            }
+            X.restore();
+        }
     }
     drawMirror(ctx,enemies,offA,label){
         ctx.fillStyle='#0008';ctx.fillRect(0,0,130,85);
