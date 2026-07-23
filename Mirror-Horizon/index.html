@@ -39,11 +39,11 @@ resize();addEventListener('resize',resize);
 const mirrors=[];
 for(let i=0;i<3;i++){const mc=document.createElement('canvas');mc.className='mirror';mc.width=130;mc.height=85;MD.appendChild(mc);mirrors.push(mc.getContext('2d'))}
 
-let game=null;const keys={};let mouseX=0,mouseY=0,mouseDX=0,mouseDY=0,mouseDown=false;
+let game=null;const keys={};let mouseX=0,mouseY=0,prevMouseX=0,prevMouseY=0,mouseDeltaX=0,mouseDown=false;
 const GAME_KEYS=new Set(['KeyW','KeyA','KeyS','KeyD','ShiftLeft','ShiftRight','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space']);
 document.addEventListener('keydown',e=>{keys[e.code]=true;if(GAME_KEYS.has(e.code))e.preventDefault()});
 document.addEventListener('keyup',e=>{keys[e.code]=false;});
-document.addEventListener('mousemove',e=>{mouseDX=e.movementX||0;mouseDY=e.movementY||0;mouseX=e.clientX;mouseY=e.clientY});
+document.addEventListener('mousemove',e=>{mouseX=e.clientX;mouseY=e.clientY});
 document.addEventListener('mousedown',e=>{if(!game){game=new Game();START.style.display='none'}else if(e.button===0){mouseDown=true;game.shoot()}});
 document.addEventListener('mouseup',e=>{mouseDown=false});
 C.addEventListener('contextmenu',e=>e.preventDefault());
@@ -72,8 +72,8 @@ function deformTerrain(wx,wz,amt){
 
 function proj(px,py,pz,cam){
     const rx=px-cam.x,rz=pz-cam.z;
-    const cos=Math.cos(-cam.angle),sin=Math.sin(-cam.angle);
-    const depth=rz*cos+rx*sin;
+    const cos=Math.cos(cam.angle),sin=Math.sin(cam.angle);
+    const depth=rx*sin+rz*cos;
     if(depth<2)return null;
     const inv=400/depth;
     return{x:(rx*cos-rz*sin)*inv,y:(py-25)*inv*0.4,depth};
@@ -121,8 +121,8 @@ class Robot{
     }
     draw(ctx,cx,cy,cz,ca){
         const rx=this.x-cx,rz=this.z-cz;
-        const cos=Math.cos(-ca),sin=Math.sin(-ca);
-        const depth=rz*cos+rx*sin;
+        const cos=Math.cos(ca),sin=Math.sin(ca);
+        const depth=rx*sin+rz*cos;
         if(depth<5)return;
         const inv=400/depth;
         const sx=W/2+(rx*cos-rz*sin)*inv;
@@ -241,17 +241,21 @@ class Game{
         for(const e of this.enemies){
             if(!e.alive)continue;
             const rx=e.x-this.cam.x,rz=e.z-this.cam.z;
-            const cos=Math.cos(-this.cam.angle),sin=Math.sin(-this.cam.angle);
-            const depth=rz*cos+rx*sin;
+            const cos=Math.cos(this.cam.angle),sin=Math.sin(this.cam.angle);
+            const depth=rx*sin+rz*cos;
             if(depth<5)continue;
             const sx=W/2+(rx*cos-rz*sin)*400/depth;
             const dx=sx-W/2;
             const s=dx*dx;
-            if(s<bestS&&s<40000){bestS=s;bestE=e}
+            if(s<bestS){bestS=s;bestE=e}
         }
 
-        // Shoot toward camera/turret direction (where mouse points)
+        // Shoot toward nearest enemy (auto-aim) or camera direction
         let aimA=this.cam.angle;
+        if(bestE){
+            const dx=bestE.x-this.cam.x,dz=bestE.z-this.cam.z;
+            aimA=Math.atan2(dx,dz);
+        }
 
         const spread=0.025;
         for(let i=-1;i<=1;i++){
