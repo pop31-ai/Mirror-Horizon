@@ -236,8 +236,7 @@ class Game{
         if(this.cooldown>0||!game||this.heat>90)return;
         this.cooldown=0.07;this.heat+=1.5;
 
-        // Aim assist
-        let aimA=this.cam.turretAngle;
+        // Find nearest enemy on screen → aim directly at it
         let bestE=null,bestS=1e9;
         for(const e of this.enemies){
             if(!e.alive)continue;
@@ -246,17 +245,16 @@ class Game{
             const depth=rz*cos+rx*sin;
             if(depth<5)continue;
             const sx=W/2+(rx*cos-rz*sin)*400/depth;
-            const sy=H*0.42;
-            const dx=sx-W/2,dy=sy-H/2;
-            const s=dx*dx+dy*dy;
+            const dx=sx-W/2;
+            const s=dx*dx;
             if(s<bestS&&s<40000){bestS=s;bestE=e}
         }
+
+        // Default: turret direction. If enemy found → aim at enemy directly
+        let aimA=this.cam.turretAngle;
         if(bestE){
             const dx=bestE.x-this.cam.x,dz=bestE.z-this.cam.z;
-            let diff=Math.atan2(dx,dz)-aimA;
-            while(diff>Math.PI)diff-=Math.PI*2;
-            while(diff<-Math.PI)diff+=Math.PI*2;
-            aimA+=diff*0.35;
+            aimA=Math.atan2(dx,dz);
         }
 
         const spread=0.025;
@@ -270,7 +268,7 @@ class Game{
                 let ad=Math.atan2(dx,dz)-a;
                 while(ad>Math.PI)ad-=Math.PI*2;
                 while(ad<-Math.PI)ad+=Math.PI*2;
-                if(Math.abs(ad)<e.size/dist+0.12&&dist<hitD){hitE=e;hitD=dist}
+                if(Math.abs(ad)<e.size/dist+0.15&&dist<hitD){hitE=e;hitD=dist}
             }
             const ex=this.cam.x+Math.sin(a)*hitD;
             const ez=this.cam.z+Math.cos(a)*hitD;
