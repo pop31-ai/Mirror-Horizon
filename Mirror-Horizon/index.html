@@ -175,7 +175,8 @@ class Game{
         this.particles=[];this.beams=[];this.debris=[];
         this.cooldown=0;this.shake=0;this.kills=0;
         this.shieldRegen=0;this.alerts=[];this.gameTime=0;
-        this.heat=0;this.zoomed=false;this.zoomLevel=1;this.targetLock=null;this.burstCount=0;this.burstTimer=0;this.startWave();
+        this.heat=0;this.zoomed=false;this.zoomLevel=1;this.targetLock=null;this.burstCount=0;this.burstTimer=0;
+        this.drones=[];this.airstrikes=[];this.smokeClouds=[];this.skyDebris=[];this.debrisScanTimer=0;this.startWave();
     }
     startWave(){
         this.wave++;this.waveTimer=3;
@@ -311,6 +312,148 @@ class Game{
             }
         }
     }
+    scanDebrisPiles(){
+        // Find clusters of debris — group nearby debris into piles
+        const used=new Set();const piles=[];
+        for(let i=0;i<this.debris.length;i++){
+            if(used.has(i))continue;
+            const pile=[i];used.add(i);
+            for(let j=i+1;j<this.debris.length;j++){
+                if(used.has(j))continue;
+                const dx=this.debris[i].x-this.debris[j].x,dz=this.debris[i].z-this.debris[j].z;
+                if(dx*dx+dz*dz<2500){pile.push(j);used.add(j)}
+            }
+            if(pile.length>=4){
+                let cx=0,cz=0;
+                for(const idx of pile){cx+=this.debris[idx].x;cz+=this.debris[idx].z}
+                cx/=pile.length;cz/=pile.length;
+                piles.push({x:cx,z:cz,count:pile.length});
+            }
+        }
+        // Also find large individual debris (size > 20)
+        for(let i=0;i<this.debris.length;i++){
+            if(this.debris[i].size>20){
+                let merged=false;
+                for(const p of piles){
+                    const dx=this.debris[i].x-p.x,dz=this.debris[i].z-p.z;
+                    if(dx*dx+dz*dz<3000){merged=true;break}
+                }
+                if(!merged)piles.push({x:this.debris[i].x,z:this.debris[i].z,count:1,large:true});
+            }
+        }
+        // Dispatch drone to pile if no ally nearby
+        for(const pile of piles){
+            let allyNear=false;
+            for(const a of this.allies){
+                if(!a.alive)continue;
+                const dx=a.x-pile.x,dz=a.z-pile.z;
+                if(dx*dx+dz*dz<15000){allyNear=true;break}
+            }
+            if(!allyNear&&!this.drones.find(d=>Math.abs(d.tx-pile.x)<50&&Math.abs(d.tz-pile.z)<50)){
+                this.dispatchDrone(pile.x,pile.z,pile.count);
+            }
+        }
+    }
+    dispatchDrone(tx,tz,pileSize){
+        const startX=this.cam.x+(Math.random()-.5)*100;
+        const startZ=this.cam.z+(Math.random()-.5)*100;
+        this.drones.push({
+            x:startX,y:40,z:startZ,tx,tz,
+            state:'flying_to',speed:250,life:20,done:false,
+            markerAlpha:0,pulseTimer:0,pileSize
+        });
+        this.alerts.push({text:'ДРОН НАПРАВЛЕН НА МЕТКУ ХЛАМА',time:2,color:'#0f0'});
+    }
+    updateDrone(d,dt){
+        d.pulseTimer+=dt;
+        if(d.state==='flying_to'){
+            const dx=d.tx-d.x,dz=d.tz-d.z;
+            const dist=Math.sqrt(dx*dx+dz*dz);
+            if(dist<15){
+                d.state='marking';d.markerAlpha=0;
+                // Smoke trail on arrival
+                for(let i=0;i<8;i++){
+                    this.addParticle(d.x+(Math.random()-.5)*8,d.y,d.z+(Math.random()-.5)*8,
+                        (Math.random()-.5)*30,-20-Math.random()*30,(Math.random()-.5)*30,'#0f0',0.5,2);
+                }
+            }else{
+                d.x+=(dx/dist)*d.speed*dt;
+                d.z+=(dz/dist)*d.speed*dt;
+                d.y=40+Math.sin(d.pulseTimer*3)*3;
+            }
+        }else if(d.state==='marking'){
+            d.markerAlpha=Math.min(1,d.markerAlpha+dt*2);
+            d.y=35+Math.sin(d.pulseTimer*5)*2;
+            // Pulse ring particles
+            if(Math.random()<dt*8){
+                const a=Math.random()*Math.PI*2;
+                this.addParticle(d.x+Math.cos(a)*8,5,d.z+Math.sin(a)*8,
+                    Math.cos(a)*40,-10,Math.sin(a)*40,'#0f0',0.4,2);
+            }
+            if(d.markerAlpha>=1){
+                d.state='returning';d.speed=350;
+                this.alerts.push({text:'МЕТКА УСТАНОВЛЕНА — УДАР ПРИНЯТ!',time:2.5,color:'#ff0'});
+                this.airstrikes.push({x:d.tx,z:d.z,timer:2.5,droneRef:d});
+            }
+        }else if(d.state==='returning'){
+            const dx=this.cam.x-d.x,dz=this.cam.z-d.z;
+            const dist=Math.sqrt(dx*dx+dz*dz);
+            if(dist<30){d.done=true;return}
+            d.x+=(dx/dist)*d.speed*dt;
+            d.z+=(dz/dist)*d.speed*dt;
+            d.y=45+Math.sin(d.pulseTimer*4)*2;
+        }
+    }
+    detonateAirstrike(strike){
+        // MASSIVE airstrike explosion on debris pile
+        this.shake=25;
+        for(let j=0;j<50;j++){
+            const angle=Math.random()*Math.PI*2,spd=60+Math.random()*150;
+            const h=Math.random()*40;
+            this.addParticle(strike.x+(Math.random()-.5)*20,h,strike.z+(Math.random()-.5)*20,
+                Math.cos(angle)*spd,-Math.random()*250-Math.random()*100,Math.sin(angle)*spd,
+                j<15?'#ff4':j<30?'#f80':j<40?'#f44':'#fff',0.8+Math.random()*1.2,4+Math.random()*8);
+        }
+        // Secondary explosions
+        for(let j=0;j<20;j++){
+            const a=Math.random()*Math.PI*2,r=Math.random()*25;
+            const delay=j*0.05;
+            setTimeout(()=>{
+                if(!game)return;
+                for(let k=0;k<8;k++){
+                    const ang=Math.random()*Math.PI*2,spd=30+Math.random()*80;
+                    this.addParticle(strike.x+Math.cos(a)*r+(Math.random()-.5)*5,3+Math.random()*8,
+                        strike.z+Math.sin(a)*r+(Math.random()-.5)*5,
+                        Math.cos(ang)*spd,-Math.random()*180,Math.sin(ang)*spd,
+                        Math.random()>.5?'#f80':'#ff4',0.5+Math.random()*0.6,3+Math.random()*5);
+                }
+            },delay*1000);
+        }
+        // Shockwave ring
+        for(let j=0;j<24;j++){
+            const a=j/24*Math.PI*2;
+            this.addParticle(strike.x+Math.cos(a)*3,3,strike.z+Math.sin(a)*3,
+                Math.cos(a)*200,-30,Math.sin(a)*200,'#ff8',0.4,4);
+        }
+        // Clear debris in radius
+        const clearR=80;
+        this.debris=this.debris.filter(d=>{
+            const dx=d.x-strike.x,dz=d.z-strike.z;
+            if(dx*dx+dz*dz<clearR*clearR){
+                // Convert some debris to particles
+                for(let k=0;k<3;k++){
+                    this.addParticle(d.x+(Math.random()-.5)*5,d.y,d.z+(Math.random()-.5)*5,
+                        (Math.random()-.5)*80,-Math.random()*120,(Math.random()-.5)*80,
+                        '#f80',0.3+Math.random()*0.3,2+Math.random()*3);
+                }
+                return false;
+            }
+            return true;
+        });
+        deformTerrain(strike.x,strike.z,-8-Math.random()*6);
+        this.smokeClouds.push({x:strike.x,y:5,z:strike.z,radius:60,life:4});
+        this.score+=200;
+    }
     update(dt){
         this.gameTime+=dt;
         this.cooldown=Math.max(0,this.cooldown-dt);
@@ -383,6 +526,66 @@ class Game{
             d.angle+=dt*0.5;
             const ground=getTerrain(d.x,d.z);
             if(d.y<=ground){d.y=ground;d.vy=Math.abs(d.vy)*0.3;if(Math.abs(d.vy)<5)d.vy=0}
+        }
+
+        // === DRONE / AIRSTRIKE SYSTEM ===
+        // Scan for debris piles periodically
+        this.debrisScanTimer-=dt;
+        if(this.debrisScanTimer<=0){
+            this.debrisScanTimer=4;
+            this.scanDebrisPiles();
+        }
+        // Update drones
+        for(let i=this.drones.length-1;i>=0;i--){
+            this.drones[i].life-=dt;
+            if(this.drones[i].life<=0||this.drones[i].done){this.drones.splice(i,1);continue}
+            this.updateDrone(this.drones[i],dt);
+        }
+        // Update airstrikes
+        for(let i=this.airstrikes.length-1;i>=0;i--){
+            this.airstrikes[i].timer-=dt;
+            if(this.airstrikes[i].timer<=0){
+                this.detonateAirstrike(this.airstrikes[i]);
+                this.airstrikes.splice(i,1);
+            }
+        }
+        // Update smoke clouds (visibility blockers)
+        for(let i=this.smokeClouds.length-1;i>=0;i--){
+            const s=this.smokeClouds[i];
+            s.life-=dt;s.radius+=30*dt;
+            if(s.life<=0)this.smokeClouds.splice(i,1);
+        }
+        // Sky debris — falling chunks from above
+        if(Math.random()<dt*0.6&&this.skyDebris.length<12){
+            const a=Math.random()*Math.PI*2,d=200+Math.random()*500;
+            this.skyDebris.push({
+                x:this.cam.x+Math.cos(a)*d,z:this.cam.z+Math.sin(a)*d,
+                y:80+Math.random()*60,vy:-200-Math.random()*150,vx:(Math.random()-.5)*40,
+                vz:(Math.random()-.5)*40,size:4+Math.random()*12,life:3+Math.random()*2,
+                trail:[]
+            });
+        }
+        for(let i=this.skyDebris.length-1;i>=0;i--){
+            const sd=this.skyDebris[i];
+            sd.vy-=180*dt;sd.x+=sd.vx*dt;sd.z+=sd.vz*dt;sd.y+=sd.vy*dt;
+            sd.life-=dt;
+            sd.trail.push({x:sd.x,y:sd.y,z:sd.z,life:0.4});
+            if(sd.trail.length>15)sd.trail.shift();
+            for(const t of sd.trail)t.life-=dt;
+            if(sd.life<=0||sd.y<-5){
+                // Impact explosion
+                const ix=sd.x,iz=sd.z;
+                for(let j=0;j<12;j++){
+                    const ang=Math.random()*Math.PI*2,spd=40+Math.random()*80;
+                    this.addParticle(ix+(Math.random()-.5)*5,5+Math.random()*10,iz+(Math.random()-.5)*5,
+                        Math.cos(ang)*spd,-Math.random()*150,Math.sin(ang)*spd,
+                        j<4?'#ff4':j<8?'#f80':'#888',0.4+Math.random()*0.5,3+Math.random()*5);
+                }
+                this.addDebris(ix,getTerrain(ix,iz),iz,2+Math.random()*4,'#666','');
+                this.shake=Math.max(this.shake,4);
+                this.smokeClouds.push({x:ix,y:5,z:iz,radius:15,life:2+Math.random()});
+                this.skyDebris.splice(i,1);
+            }
         }
 
         // Update beams
@@ -523,6 +726,103 @@ class Game{
             }
         }
         X.globalAlpha=1;
+
+        // === DRAW SKY DEBRIS (trails + chunks) ===
+        for(const sd of this.skyDebris){
+            // Trail
+            for(let i=0;i<sd.trail.length;i++){
+                const t=sd.trail[i];
+                const tp=proj(t.x,t.y,t.z,this.cam);
+                if(tp&&tp.depth>2){
+                    X.globalAlpha=t.life*2;
+                    X.fillStyle='#f80';
+                    const ts=Math.max(1,(3+i*0.3)*200/tp.depth);
+                    X.fillRect(W/2+tp.x-ts/2,H*0.42+tp.y-ts/2,ts,ts);
+                }
+            }
+            X.globalAlpha=1;
+            const sp=proj(sd.x,sd.y,sd.z,this.cam);
+            if(sp&&sp.depth>2){
+                const ss=Math.max(2,sd.size*200/sp.depth);
+                X.fillStyle='#fa0';
+                X.shadowColor='#f80';X.shadowBlur=8;
+                X.fillRect(W/2+sp.x-ss/2,H*0.42+sp.y-ss/2,ss,ss);
+                X.shadowBlur=0;
+            }
+        }
+
+        // === DRAW DRONES ===
+        for(const d of this.drones){
+            const dp=proj(d.x,d.y,d.z,this.cam);
+            if(!dp||dp.depth<3)continue;
+            const dsx=W/2+dp.x,dsy=H*0.42+dp.y;
+            const dsz=Math.max(4,800/dp.depth);
+            // Drone body
+            X.fillStyle='#0f0';
+            X.fillRect(dsx-dsz*0.5,dsy-dsz*0.15,dsz,dsz*0.3);
+            X.fillRect(dsx-dsz*0.08,dsy-dsz*0.5,dsz*0.16,dsz);
+            // Rotors
+            const rotorPhase=d.pulseTimer*15;
+            X.strokeStyle='#0f08';X.lineWidth=1;
+            X.beginPath();X.arc(dsx-dsz*0.35,dsy,dsz*0.2,rotorPhase,rotorPhase+Math.PI*1.5);X.stroke();
+            X.beginPath();X.arc(dsx+dsz*0.35,dsy,dsz*0.2,rotorPhase+1,rotorPhase+Math.PI*1.5+1);X.stroke();
+            // Marker beam when marking
+            if(d.state==='marking'){
+                const beamAlpha=d.markerAlpha*(0.5+Math.sin(d.pulseTimer*8)*0.3);
+                X.strokeStyle=`rgba(0,255,0,${beamAlpha})`;X.lineWidth=2;
+                X.beginPath();X.moveTo(dsx,dsy+dsz*0.3);X.lineTo(dsx,dsy+200);X.stroke();
+                // Target circle on ground
+                const gp=proj(d.tx,0,d.tz,this.cam);
+                if(gp&&gp.depth>3){
+                    const gr=3000/gp.depth;
+                    X.strokeStyle=`rgba(0,255,0,${beamAlpha})`;X.lineWidth=2;
+                    X.beginPath();X.arc(W/2+gp.x,H*0.42+gp.y,gr,0,Math.PI*2);X.stroke();
+                    // Spinning brackets
+                    for(let i=0;i<4;i++){
+                        const ba=d.pulseTimer*2+i*Math.PI/2;
+                        const bx=W/2+gp.x+Math.cos(ba)*gr*1.2;
+                        const by=H*0.42+gp.y+Math.sin(ba)*gr*0.4;
+                        X.fillStyle=`rgba(0,255,0,${beamAlpha})`;
+                        X.fillRect(bx-2,by-2,4,4);
+                    }
+                }
+            }
+            // State label
+            X.fillStyle='#0f0a';X.font='8px Courier New';X.textAlign='center';
+            const stateLabel=d.state==='flying_to'?'НА ПОДЛЕТЕ':d.state==='marking'?'МАРКИРОВКА':'ВОЗВРАТ';
+            X.fillText(stateLabel,dsx,dsy-dsz*0.7);
+        }
+
+        // === DRAW AIRSTRIKE INDICATORS ===
+        for(const st of this.airstrikes){
+            const sp=proj(st.x,0,st.z,this.cam);
+            if(sp&&sp.depth>3){
+                const flash=0.5+Math.sin(st.timer*10)*0.5;
+                const sr=5000/sp.depth;
+                X.strokeStyle=`rgba(255,255,0,${flash*0.6})`;X.lineWidth=3;
+                X.beginPath();X.arc(W/2+sp.x,H*0.42+sp.y,sr,0,Math.PI*2);X.stroke();
+                X.strokeStyle=`rgba(255,80,0,${flash*0.4})`;X.lineWidth=2;
+                X.beginPath();X.arc(W/2+sp.x,H*0.42+sp.y,sr*1.3,0,Math.PI*2);X.stroke();
+                X.fillStyle=`rgba(255,255,0,${flash*0.8})`;X.font='bold 12px Courier New';X.textAlign='center';
+                X.fillText('УДАР ЧЕРЕЗ '+st.timer.toFixed(1)+'с',W/2+sp.x,H*0.42+sp.y-sr-10);
+            }
+        }
+
+        // === DRAW SMOKE CLOUDS (visibility blockers) ===
+        for(const s of this.smokeClouds){
+            const sp=proj(s.x,s.y,s.z,this.cam);
+            if(sp&&sp.depth>3){
+                const sr=Math.max(10,s.radius*400/sp.depth);
+                const alpha=Math.min(0.5,s.life*0.2);
+                const grad=X.createRadialGradient(W/2+sp.x,H*0.42+sp.y,0,W/2+sp.x,H*0.42+sp.y,sr);
+                grad.addColorStop(0,`rgba(40,30,20,${alpha})`);
+                grad.addColorStop(0.5,`rgba(30,20,10,${alpha*0.5})`);
+                grad.addColorStop(1,'rgba(20,10,0,0)');
+                X.fillStyle=grad;
+                X.beginPath();X.arc(W/2+sp.x,H*0.42+sp.y,sr,0,Math.PI*2);X.fill();
+            }
+        }
+
         X.restore();
 
         // HUD
@@ -549,6 +849,8 @@ class Game{
 <div style="color:#f44">ВРАГИ: ${this.enemies.filter(e=>e.alive).length}</div>
 <div style="color:#4af">СОЮЗНИКИ: ${this.allies.filter(a=>a.alive).length}</div>
 <div style="color:#fff8">УНИЧТОЖЕНО: ${this.kills}</div>
+${this.drones.length?`<div style="color:#0f0">ДРОНЫ: ${this.drones.length}</div>`:''}
+${this.airstrikes.length?`<div style="color:#ff0">УДАРЫ: ${this.airstrikes.length}</div>`:''}
 <div style="color:#fff3;font-size:9px">W/S ГАЗ | A/D ПОВОРОТ<br>МЫШЬ БАШНЯ | ЛКМ ОГОНЬ<br>ПКМ/E — ЗУМ | АВТОПРИЦЕЛ</div>`;
 
         // Mirrors
@@ -717,6 +1019,19 @@ class Game{
         for(const e of this.enemies){if(!e.alive)continue;
             const ex=mx+mw/2+(e.x-this.cam.x)*sc,ey=my+mh/2+(e.z-this.cam.z)*sc;
             if(ex>mx&&ex<mx+mw&&ey>my&&ey<my+mh){X.fillStyle='#f44';X.fillRect(ex-1,ey-1,3,3)}}
+        // Drones on minimap
+        for(const d of this.drones){
+            const ex=mx+mw/2+(d.x-this.cam.x)*sc,ey=my+mh/2+(d.z-this.cam.z)*sc;
+            if(ex>mx&&ex<mx+mw&&ey>my&&ey<my+mh){X.fillStyle='#0f0';X.fillRect(ex-2,ey-2,4,4)}
+        }
+        // Airstrike targets on minimap
+        for(const s of this.airstrikes){
+            const ex=mx+mw/2+(s.x-this.cam.x)*sc,ey=my+mh/2+(s.z-this.cam.z)*sc;
+            if(ex>mx&&ex<mx+mw&&ey>my&&ey<my+mh){
+                X.strokeStyle='#ff0';X.lineWidth=1;
+                X.beginPath();X.arc(ex,ey,5+Math.sin(this.gameTime*8)*2,0,Math.PI*2);X.stroke();
+            }
+        }
         X.fillStyle='#6668';X.font='8px Courier New';X.textAlign='left';
         X.fillText('ХЛАМ:'+this.debris.length,mx+4,my+mh-4);
     }
