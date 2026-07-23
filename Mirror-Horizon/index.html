@@ -43,10 +43,9 @@ let game=null;const keys={};let mouseX=0,mouseY=0,mouseDown=false;
 const GAME_KEYS=new Set(['KeyW','KeyA','KeyS','KeyD','ShiftLeft','ShiftRight','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space']);
 document.addEventListener('keydown',e=>{keys[e.code]=true;if(GAME_KEYS.has(e.code))e.preventDefault()});
 document.addEventListener('keyup',e=>{keys[e.code]=false;});
-C.addEventListener('mousemove',e=>{mouseX=e.clientX;mouseY=e.clientY});
-C.addEventListener('mousedown',e=>{mouseDown=true;if(e.button===0&&game)game.shoot()});
-C.addEventListener('mouseup',e=>{mouseDown=false});
-START.addEventListener('click',()=>{if(!game){game=new Game();START.style.display='none'}});
+document.addEventListener('mousemove',e=>{mouseX=e.clientX;mouseY=e.clientY});
+document.addEventListener('mousedown',e=>{if(!game){game=new Game();START.style.display='none'}else if(e.button===0){mouseDown=true;game.shoot()}});
+document.addEventListener('mouseup',e=>{mouseDown=false});
 C.addEventListener('contextmenu',e=>e.preventDefault());
 
 const ALLY_NAMES=['ВАРДЕН','СТРАЖ','ЩИТ','БАСТИОН','ГВАРД','ОПЛОТ','ЗАСЛОН','КАРАУЛ','ФОРПОСТ','КУРАНТ'];
@@ -284,6 +283,7 @@ class Game{
         this.cooldown=Math.max(0,this.cooldown-dt);
         this.heat=Math.max(0,this.heat-dt*15);
         this.shake*=0.85;
+        if(mouseDown)this.shoot();
 
         // Turret — smooth follow of mouse cursor
         const mouseOffX=(mouseX-W/2)/(W*0.35);
@@ -372,7 +372,7 @@ class Game{
         // Distant fires
         for(let i=0;i<Math.min(this.debris.length,6);i++){
             const gx=(i*197+W*0.5+this.cam.angle*100)%W;
-            X.fillStyle=`rgba(255,80,0,${0.03+Math.sin(this.time*2+i)*0.02})`;
+            X.fillStyle=`rgba(255,80,0,${0.03+Math.sin(this.gameTime*2+i)*0.02})`;
             X.fillRect(gx-15,horizonY-4,30,8);
         }
 
