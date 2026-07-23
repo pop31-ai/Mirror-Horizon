@@ -234,7 +234,7 @@ class Game{
     }
     shoot(){
         if(this.cooldown>0||!game||this.heat>90)return;
-        this.cooldown=0.08;this.heat+=3;
+        this.cooldown=0.07;this.heat+=1.5;
 
         // Aim assist
         let aimA=this.cam.turretAngle;
@@ -256,7 +256,7 @@ class Game{
             let diff=Math.atan2(dx,dz)-aimA;
             while(diff>Math.PI)diff-=Math.PI*2;
             while(diff<-Math.PI)diff+=Math.PI*2;
-            aimA+=diff*0.15;
+            aimA+=diff*0.35;
         }
 
         const spread=0.025;
@@ -270,7 +270,7 @@ class Game{
                 let ad=Math.atan2(dx,dz)-a;
                 while(ad>Math.PI)ad-=Math.PI*2;
                 while(ad<-Math.PI)ad+=Math.PI*2;
-                if(Math.abs(ad)<e.size/dist+0.08&&dist<hitD){hitE=e;hitD=dist}
+                if(Math.abs(ad)<e.size/dist+0.12&&dist<hitD){hitE=e;hitD=dist}
             }
             const ex=this.cam.x+Math.sin(a)*hitD;
             const ez=this.cam.z+Math.cos(a)*hitD;
@@ -312,7 +312,7 @@ class Game{
     update(dt){
         this.gameTime+=dt;
         this.cooldown=Math.max(0,this.cooldown-dt);
-        this.heat=Math.max(0,this.heat-dt*25);
+        this.heat=Math.max(0,this.heat-dt*30);
         this.shake*=0.85;
         if(mouseDown)this.shoot();
 
@@ -323,7 +323,7 @@ class Game{
         let tDiff=targetTurret-this.cam.turretAngle;
         while(tDiff>Math.PI)tDiff-=Math.PI*2;
         while(tDiff<-Math.PI)tDiff+=Math.PI*2;
-        this.cam.turretAngle+=tDiff*Math.min(1,12*dt);
+        this.cam.turretAngle+=tDiff*Math.min(1,25*dt);
         const targetPitch=-mouseOffY*0.5;
         this.cam.pitch+=(targetPitch-this.cam.pitch)*Math.min(1,10*dt);
 
