@@ -211,7 +211,7 @@ class Game{
     }
     shoot(){
         if(this.cooldown>0||!game||this.heat>90)return;
-        this.cooldown=0.08;this.heat+=8;
+        this.cooldown=0.08;this.heat+=3;
 
         // Aim assist
         let aimA=this.cam.turretAngle;
@@ -281,7 +281,7 @@ class Game{
     update(dt){
         this.gameTime+=dt;
         this.cooldown=Math.max(0,this.cooldown-dt);
-        this.heat=Math.max(0,this.heat-dt*15);
+        this.heat=Math.max(0,this.heat-dt*25);
         this.shake*=0.85;
         if(mouseDown)this.shoot();
 
