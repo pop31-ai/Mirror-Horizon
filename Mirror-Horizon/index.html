@@ -199,7 +199,7 @@ class Game{
     }
     addDebris(x,y,z,sz,color,name){
         if(this.debris.length>=MAX_DEBRIS)this.debris.shift();
-        this.debris.push({x,y,z,size:sz,color,name,angle:Math.random()*6});
+        this.debris.push({x,y,z,vy:0,size:sz,color,name,angle:Math.random()*6,grounded:false});
     }
     robotShoot(robot,target){
         const dx=target.x-robot.x,dz=target.z-robot.z;
@@ -374,6 +374,18 @@ class Game{
             p.y+=p.vy*dt;p.vy+=120*dt;
             p.life-=dt;
             if(p.life<=0){this.particles[i]=this.particles[this.particles.length-1];this.particles.pop()}
+        }
+
+        // Update debris — gravity and ground settling
+        for(const d of this.debris){
+            if(!d.grounded){
+                d.vy=(d.vy||0)+300*dt;
+                d.y+=d.vy*dt;
+                const ground=getTerrain(d.x,d.z);
+                if(d.y<=ground){d.y=ground;d.vy*=-0.25;d.grounded=Math.abs(d.vy)<15;if(d.vy>0)d.vy=0}
+            }else{
+                d.y=getTerrain(d.x,d.z);
+            }
         }
 
         // Update beams
