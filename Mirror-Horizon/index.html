@@ -27,7 +27,7 @@ canvas{display:block}
 <div id="start">
 MIRROR HORIZON
 <span class="sub">CLICK TO DEPLOY</span>
-<span class="keys">W/S — ГАЗ / ТОРМОЗ | A/D — ПОВОРОТ<br>МЫШЬ — ВВЕРХ/ВНИЗ (НАКЛОН) | ЛКМ — ОГОНЬ<br>SHIFT — ТУРБО | АВТОПРИЦЕЛ</span>
+<span class="keys">W/S — ГАЗ / ТОРМОЗ | A/D — ПОВОРОТ<br>МЫШЬ — НАКЛОН ВВЕРХ/ВНИЗ | ЛКМ — ОГОНЬ<br>SHIFT — ТУРБО | АВТОПРИЦЕЛ</span>
 </div>
 <script>
 const C=document.getElementById('c'),X=C.getContext('2d'),UI=document.getElementById('ui'),
@@ -250,16 +250,8 @@ class Game{
             if(s<bestS&&s<40000){bestS=s;bestE=e}
         }
 
-        // Aim: camera forward direction, snapped to nearest enemy on screen
+        // Shoot toward camera/turret direction (where mouse points)
         let aimA=this.cam.angle;
-        if(bestE){
-            const dx=bestE.x-this.cam.x,dz=bestE.z-this.cam.z;
-            let eAngle=Math.atan2(dx,dz);
-            let diff=eAngle-aimA;
-            while(diff>Math.PI)diff-=Math.PI*2;
-            while(diff<-Math.PI)diff+=Math.PI*2;
-            aimA+=diff*0.85;
-        }
 
         const spread=0.025;
         for(let i=-1;i<=1;i++){
@@ -318,23 +310,26 @@ class Game{
         this.shake*=0.85;
         if(mouseDown)this.shoot();
 
-        // No mouse rotation — camera = vehicle heading, crosshair = screen center
+        // Mouse Y = pitch only. Rotation = WASD keys only
         const mouseOffY=(mouseY-H/2)/(H*0.5);
-        const targetPitch=-mouseOffY*0.3;
-        this.cam.pitch+=(targetPitch-this.cam.pitch)*Math.min(1,8*dt);
+        const targetPitch=-mouseOffY*0.4;
+        this.cam.pitch+=(targetPitch-this.cam.pitch)*Math.min(1,10*dt);
 
-        // Vehicle movement — W/S gas, A/D always turn
+        // WASD moves, A/D also turns camera
         const turbo=keys['ShiftLeft']||keys['ShiftRight'];
         const maxSpd=turbo?250:140;
-        if(keys['KeyW']||keys['ArrowUp'])this.speed=Math.min(this.speed+300*dt,maxSpd);
-        else if(keys['KeyS']||keys['ArrowDown'])this.speed=Math.max(this.speed-400*dt,-maxSpd*0.4);
-        else this.speed*=0.92;
-        const turnSpeed=2.5;
-        if(keys['KeyA']||keys['ArrowLeft'])this.cam.angle-=turnSpeed*dt;
-        if(keys['KeyD']||keys['ArrowRight'])this.cam.angle+=turnSpeed*dt;
-
-        this.cam.x+=Math.sin(this.cam.angle)*this.speed*dt;
-        this.cam.z+=Math.cos(this.cam.angle)*this.speed*dt;
+        if(keys['KeyA']||keys['ArrowLeft'])this.cam.angle-=2.5*dt;
+        if(keys['KeyD']||keys['ArrowRight'])this.cam.angle+=2.5*dt;
+        let moveF=0;
+        if(keys['KeyW']||keys['ArrowUp'])moveF+=1;
+        if(keys['KeyS']||keys['ArrowDown'])moveF-=1;
+        if(moveF!==0){
+            this.speed=Math.min(this.speed+400*dt,maxSpd);
+            this.cam.x+=Math.sin(this.cam.angle)*moveF*this.speed*dt;
+            this.cam.z+=Math.cos(this.cam.angle)*moveF*this.speed*dt;
+        }else{
+            this.speed*=0.9;
+        }
         this.cam.y=getTerrain(this.cam.x,this.cam.z)+25;
 
         this.shieldRegen+=dt;
